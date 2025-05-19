@@ -1,4 +1,7 @@
-export enum OrderStatus {
+import { DataTypes, Model } from 'sequelize';
+import { sequelize } from '../config/database';
+
+enum OrderStatus {
   CREATED = 'CREATED',
   PAYMENT_PENDING = 'PAYMENT_PENDING',
   PAID = 'PAID',
@@ -10,42 +13,68 @@ export enum OrderStatus {
   CANCELLED = 'CANCELLED'
 }
 
-// Representa um item no pedido
-export interface OrderItem {
+interface OrderItem {
   productId: string;
   quantity: number;
   price: number;
 }
 
-// Representa um pedido completo
-export interface Order {
+interface OrderAttributes {
   id: string;
   customerId: string;
   items: OrderItem[];
   status: OrderStatus;
   total: number;
-  createdAt: Date;
-  updatedAt: Date;
+  paymentId?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
-// Evento emitido quando um pedido é criado
-export interface OrderCreatedEvent {
-  orderId: string;
-  customerId: string;
-  items: OrderItem[];
-  total: number;
+class Order extends Model<OrderAttributes> implements OrderAttributes {
+  public id!: string;
+  public customerId!: string;
+  public items!: OrderItem[];
+  public status!: OrderStatus;
+  public total!: number;
+  public paymentId?: string;
+  public readonly createdAt!: Date;
+  public readonly updatedAt!: Date;
 }
 
-// Evento emitido quando um pedido é finalizado
-export interface OrderCompletedEvent {
-  orderId: string;
-  customerId: string;
-  status: OrderStatus;
-}
+Order.init({
+  id: {
+    type: DataTypes.STRING,
+    primaryKey: true,
+    defaultValue: DataTypes.UUIDV4
+  },
+  customerId: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    field: 'customer_id'
+  },
+  items: {
+    type: DataTypes.JSON,
+    allowNull: false
+  },
+  status: {
+    type: DataTypes.ENUM(...Object.values(OrderStatus)),
+    allowNull: false,
+    defaultValue: OrderStatus.CREATED
+  },
+  total: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: false
+  },
+  paymentId: {
+    type: DataTypes.STRING,
+    field: 'payment_id'
+  }
+}, {
+  sequelize,
+  tableName: 'orders',
+  timestamps: true,
+  createdAt: 'created_at',
+  updatedAt: 'updated_at'
+});
 
-// Evento emitido quando ocorre falha em um pedido
-export interface OrderFailedEvent {
-  orderId: string;
-  reason: string;
-  status: OrderStatus;
-}
+export { Order, OrderAttributes, OrderItem, OrderStatus };

@@ -10,9 +10,13 @@ export const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqps://vnxatifg:@leopa
 
 // Nomes das filas
 export const QUEUES = {
+  NEW_ORDER_REQUEST: 'new-order-request',
   ORDER_CREATED: 'order-created',
   PAYMENT_PROCESSED: 'payment-processed',
+  PAYMENT_FAILED: 'payment-failed',
+  INVENTORY_CHECK: 'inventory-check',
   INVENTORY_UPDATED: 'inventory-updated',
+  INVENTORY_FAILED: 'inventory-failed',
   ORDER_COMPLETED: 'order-completed',
   ORDER_FAILED: 'order-failed'
 };
@@ -86,7 +90,7 @@ export class RabbitMQClient {
         console.log('Conexão com RabbitMQ estabelecida com sucesso');
       }
     } catch (error) {
-      console.error('Erro ao conectar com RabbitMQ:', error);
+      console.error('Erro ao conectar com RabbitMQ:', error instanceof Error ? error.message : String(error));
       throw error;
     }
   }
@@ -109,7 +113,7 @@ export class RabbitMQClient {
         resolve(success);
       });
     } catch (error) {
-      console.error(`Erro ao publicar mensagem na fila ${queue}:`, error);
+      console.error(`Erro ao publicar mensagem na fila ${queue}:`, error instanceof Error ? error.message : String(error));
       throw error;
     }
   }
@@ -139,7 +143,7 @@ export class RabbitMQClient {
             this.channel.ack(msg);
           }
         } catch (error) {
-          console.error(`Erro ao processar mensagem da fila ${queue}:`, error);
+          console.error(`Erro ao processar mensagem da fila ${queue}:`, error instanceof Error ? error.message : String(error));
           // Rejeita a mensagem em caso de erro
           if (this.channel) {
             this.channel.nack(msg, false, false);
@@ -189,7 +193,7 @@ export class RabbitMQClient {
           resolve();
         }
       } catch (error) {
-        console.error('Erro ao fechar conexão com RabbitMQ:', error);
+        console.error('Erro ao fechar conexão com RabbitMQ:', error instanceof Error ? error.message : String(error));
         reject(error);
       }
     });

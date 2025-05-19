@@ -1,26 +1,23 @@
 import express, { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { RabbitMQClient, QUEUES, Message } from '../../common/src/rabbitmq';
-import { Order, OrderCreatedEvent, OrderStatus } from './models/order';
+import { RabbitMQClient, QUEUES } from './config/rabbitmq';
+import { OrderStatus } from './models/order';
+import { orderRepository } from './repositories/orderRepository';
+import { sequelize, testConnection } from './config/database';
 
-// Banco de dados em memória para armazenar pedidos
-const orders: Record<string, Order> = {};
-
-// Inicializa o serviço Express
 const app = express();
 app.use(express.json());
 const PORT = process.env.PORT || 3001;
 
-// Middleware de logging detalhado
+// Middleware de logging
 app.use((req: Request, res: Response, next: Function) => {
   const start = Date.now();
   const { method, originalUrl, body, params, query } = req;
   
-  // Log da requisição recebida
   console.log('↘️ Recebida requisição:', {
     method,
     url: originalUrl,
-    body: method === 'GET' ? undefined : body, // Não loga body para GET
+    body: method === 'GET' ? undefined : body,
     params,
     query,
     timestamp: new Date().toISOString()
@@ -33,17 +30,16 @@ app.use((req: Request, res: Response, next: Function) => {
       duration: `${duration}ms`,
       timestamp: new Date().toISOString()
     });
-    console.log('---'); // Separador visual
+    console.log('---');
   });
 
   next();
 });
 
-// Inicializa o cliente RabbitMQ
 const rabbitMQClient = new RabbitMQClient();
 
-// Manipula a criação de novos pedidos
-app.post('/orders', async (req: Request, res: Response): Promise<any> => {
+// Criação de pedidos (atualizado)
+app.post('/orders', async (req, res) => {
   try {
     const { customerId, items } = req.body;
     
@@ -51,37 +47,26 @@ app.post('/orders', async (req: Request, res: Response): Promise<any> => {
       return res.status(400).json({ error: 'Dados de pedido inválidos' });
     }
     
-    // Calcula o total do pedido
     const total = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     
-    // Cria um novo pedido
-    const orderId = uuidv4();
-    const order: Order = {
-      id: orderId,
-      customerId,
-      items,
-      status: OrderStatus.CREATED,
-      total,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    
-    // Armazena o pedido
-    orders[orderId] = order;
-    
-    // Atualiza o status do pedido
-    order.status = OrderStatus.PAYMENT_PENDING;
-    order.updatedAt = new Date();
-    
-    // Cria o evento de pedido criado
-    const orderCreatedEvent: OrderCreatedEvent = {
-      orderId,
+    // Cria o pedido com Sequelize
+    const order = await orderRepository.createOrder({
       customerId,
       items,
       total
+    });
+    
+    // Atualiza status
+    await orderRepository.updateOrderStatus(order.id, OrderStatus.PAYMENT_PENDING);
+    
+    // Publica evento
+    const orderCreatedEvent = {
+      orderId: order.id,
+      customerId: order.customerId,
+      items: order.items,
+      total: order.total
     };
     
-    // Publica o evento no RabbitMQ
     await rabbitMQClient.publishMessage(QUEUES.ORDER_CREATED, {
       id: uuidv4(),
       timestamp: Date.now(),
@@ -90,159 +75,100 @@ app.post('/orders', async (req: Request, res: Response): Promise<any> => {
     
     res.status(201).json({ 
       message: 'Pedido criado com sucesso',
-      orderId,
-      status: order.status
+      orderId: order.id,
+      status: OrderStatus.PAYMENT_PENDING
     });
   } catch (error) {
-    console.error('Erro ao criar pedido:', error);
+    console.error('Erro ao criar pedido:', error instanceof Error ? error.message : String(error));
     res.status(500).json({ error: 'Erro ao processar pedido' });
   }
 });
 
-// Busca um pedido pelo ID
-app.get('/orders/:id', (req: Request, res: Response): any => {
-  const orderId = req.params.id;
-  const order = orders[orderId];
-  
-  if (!order) {
-    return res.status(404).json({ error: 'Pedido não encontrado' });
-  }
-  
-  res.json(order);
-});
-
-// Lista todos os pedidos
-app.get('/orders', (req, res) => {
-  res.json(Object.values(orders));
-});
-
-// Função para processar evento de pagamento processado
-async function handlePaymentProcessed(message: Message): Promise<void> {
-  const { paymentId, orderId, status } = message.data;
-  
-  const order = orders[orderId];
-  if (!order) {
-    console.error(`Pedido ${orderId} não encontrado para atualização de pagamento`);
-    return;
-  }
-  
-  if (status === 'COMPLETED') {
-    // Pagamento bem-sucedido
-    order.status = OrderStatus.PAID;
-    order.updatedAt = new Date();
-    console.log(`Pagamento ${paymentId} confirmado para o pedido ${orderId}`);
-    
-    // Inicia verificação de estoque
-    order.status = OrderStatus.INVENTORY_CHECKING;
-    order.updatedAt = new Date();
-    
-    // Solicita verificação de estoque
-    await rabbitMQClient.publishMessage(QUEUES.PAYMENT_PROCESSED, {
-      id: uuidv4(),
-      timestamp: Date.now(),
-      data: {
-        orderId,
-        items: order.items
-      }
-    });
-  } else {
-    // Pagamento falhou
-    order.status = OrderStatus.PAYMENT_FAILED;
-    order.updatedAt = new Date();
-    console.log(`Pagamento ${paymentId} falhou para o pedido ${orderId}`);
-    
-    // Publica evento de falha no pedido
-    await rabbitMQClient.publishMessage(QUEUES.ORDER_FAILED, {
-      id: uuidv4(),
-      timestamp: Date.now(),
-      data: {
-        orderId,
-        reason: 'Falha no processamento do pagamento',
-        status: order.status
-      }
-    });
-  }
-}
-
-// Função para processar evento de estoque atualizado
-async function handleInventoryUpdated(message: Message): Promise<void> {
-  const { orderId, success } = message.data;
-  
-  const order = orders[orderId];
-  if (!order) {
-    console.error(`Pedido ${orderId} não encontrado para atualização de estoque`);
-    return;
-  }
-  
-  if (success) {
-    // Estoque confirmado
-    order.status = OrderStatus.INVENTORY_CONFIRMED;
-    order.updatedAt = new Date();
-    console.log(`Estoque confirmado para o pedido ${orderId}`);
-    
-    // Finaliza o pedido
-    order.status = OrderStatus.COMPLETED;
-    order.updatedAt = new Date();
-    
-    // Publica evento de pedido completado
-    await rabbitMQClient.publishMessage(QUEUES.ORDER_COMPLETED, {
-      id: uuidv4(),
-      timestamp: Date.now(),
-      data: {
-        orderId,
-        customerId: order.customerId,
-        status: order.status
-      }
-    });
-  } else {
-    // Estoque insuficiente
-    order.status = OrderStatus.INVENTORY_FAILED;
-    order.updatedAt = new Date();
-    console.log(`Estoque insuficiente para o pedido ${orderId}`);
-    
-    // Cancela o pedido
-    order.status = OrderStatus.CANCELLED;
-    order.updatedAt = new Date();
-    
-    // Publica evento de falha no pedido
-    await rabbitMQClient.publishMessage(QUEUES.ORDER_FAILED, {
-      id: uuidv4(),
-      timestamp: Date.now(),
-      data: {
-        orderId,
-        reason: 'Estoque insuficiente',
-        status: order.status
-      }
-    });
-  }
-}
-
-// Função para inicializar o serviço
-async function startService() {
+// Atualizar status do pagamento (atualizado)
+app.patch('/orders/:id/payment', async (req: Request, res: Response) => {
   try {
-    // Inicializa conexão com RabbitMQ
-    await rabbitMQClient.initialize();
-    
-    // Registra listeners para as filas relevantes
-    await rabbitMQClient.subscribeToQueue(QUEUES.PAYMENT_PROCESSED, handlePaymentProcessed);
-    await rabbitMQClient.subscribeToQueue(QUEUES.INVENTORY_UPDATED, handleInventoryUpdated);
-    
-    // Inicia o servidor Express
-    app.listen(PORT, () => {
-      console.log(`Serviço de Pedidos rodando na porta ${PORT}`);
+    const orderId = req.params.id;
+    const { status, paymentId } = req.body;
+
+    const [affectedCount] = await orderRepository.updatePaymentStatus(
+      orderId, 
+      status as OrderStatus,
+      paymentId
+    );
+
+    if (affectedCount === 0) {
+      return res.status(404).json({ error: 'Pedido não encontrado' });
+    }
+
+    res.json({ 
+      message: `Status de pagamento para o pedido ${orderId} atualizado com sucesso` 
     });
   } catch (error) {
-    console.error('Erro ao inicializar o serviço de pedidos:', error);
+    console.error('Erro ao atualizar o status do pagamento:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Erro ao atualizar o status do pagamento' });
+  }
+});
+
+app.patch('/orders/:id/status', async (req: Request, res: Response) => {
+  try {
+    const orderId = req.params.id;
+    const { status } = req.body;
+    
+    const [affectedCount] = await orderRepository.updateOrderStatus(
+      orderId,
+      status as OrderStatus,
+    );
+
+    if (affectedCount === 0) {
+      return res.status(404).json({ error: 'Pedido não encontrado' });
+    }
+
+    res.json({ 
+      message: `Status de pagamento para o pedido ${orderId} atualizado com sucesso` 
+    });
+  } catch (error) {
+    console.error('Erro ao atualizar o status do pagamento:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Erro ao atualizar o status do pagamento' });
+  }
+});
+
+// Busca um pedido pelo ID (atualizado)
+app.get('/orders/:id', async (req: Request, res: Response) => {
+  try {
+    const orderId = req.params.id;
+    const order = await orderRepository.getOrderById(orderId);
+
+    if (!order) {
+      return res.status(404).json({ error: 'Pedido não encontrado' });
+    }
+
+    res.json(order);
+  } catch (error) {
+    console.error('Erro ao buscar pedido:', error instanceof Error ? error.message : String(error));
+    res.status(500).json({ error: 'Erro ao buscar pedido' });
+  }
+});
+
+// Inicialização do serviço (atualizada)
+async function startService() {
+  try {
+    // Testa conexão com MySQL
+    await testConnection();
+    
+    // Sincroniza modelos (cria tabelas se não existirem)
+    await sequelize.sync({ alter: true });
+    console.log('Modelos sincronizados com o banco de dados');
+    
+    // Inicializa RabbitMQ
+    await rabbitMQClient.initialize();
+    
+    app.listen(PORT, () => {
+      console.log(`Order API rodando na porta ${PORT}`);
+    });
+  } catch (error) {
+    console.error('Erro ao iniciar Order API:', error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
 }
 
-// Inicia o serviço
 startService();
-
-// Gerencia encerramento do processo
-process.on('SIGINT', async () => {
-  console.log('Encerrando serviço de pedidos...');
-  await rabbitMQClient.close();
-  process.exit(0);
-});
