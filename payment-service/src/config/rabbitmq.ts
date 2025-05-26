@@ -17,6 +17,7 @@ export const QUEUES = {
   INVENTORY_CHECK: 'inventory-check',
   INVENTORY_UPDATED: 'inventory-updated',
   INVENTORY_FAILED: 'inventory-failed',
+  INVENTORY_FAILED_PAYMENT: 'inventory-failed-payment',
   ORDER_COMPLETED: 'order-completed',
   ORDER_FAILED: 'order-failed'
 };

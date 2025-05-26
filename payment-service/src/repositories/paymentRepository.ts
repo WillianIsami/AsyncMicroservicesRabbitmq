@@ -27,6 +27,17 @@ class PaymentRepository {
   async getPaymentsByOrderId(orderId: string): Promise<Payment[]> {
     return Payment.findAll({ where: { orderId } });
   }
+
+  async cancelPayment(id: string, reason?: string): Promise<[number]> {
+    return Payment.update({ 
+      status: PaymentStatus.CANCELLED,
+      transactionId: `cancel_${Date.now()}_${reason ? reason.substring(0, 20) : ''}`
+    }, { 
+      where: { 
+        id,
+      } 
+    });
+  }
 }
 
 export const paymentRepository = new PaymentRepository();

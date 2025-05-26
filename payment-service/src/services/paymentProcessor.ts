@@ -50,12 +50,30 @@ class PaymentProcessor {
     }
   }
 
+  async cancelPayment(paymentId: string, reason?: string): Promise<void> {
+    try {
+      const payment = await paymentRepository.getPaymentById(paymentId);
+      if (!payment) throw new Error('Pagamento não encontrado');
+
+      // Atualiza status para CANCELLED
+      const [affectedRows] = await paymentRepository.cancelPayment(paymentId, reason);
+      
+      if (affectedRows === 0) {
+        throw new Error('Nenhum pagamento foi cancelado - verifique o status atual');
+      }
+    } catch (error) {
+      console.error(`Erro ao cancelar pagamento ${paymentId}:`, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+
   private async publishPaymentResult(
     orderId: string,
     paymentId: string,
     status: PaymentStatus,
     amount: number,
-    transactionId?: string
+    transactionId?: string,
+    reason?: string
   ): Promise<void> {
     const eventData = {
       paymentId,
@@ -63,6 +81,7 @@ class PaymentProcessor {
       status,
       amount,
       transactionId,
+      reason,
       timestamp: new Date().toISOString()
     };
 
@@ -72,6 +91,12 @@ class PaymentProcessor {
     // Publica em fila específica por status
     if (status === PaymentStatus.COMPLETED) {
       await rabbitMQClient.publishMessage(QUEUES.PAYMENT_PROCESSED, {
+        id: uuidv4(),
+        timestamp: Date.now(),
+        data: eventData,
+      });
+    } else if (status === PaymentStatus.CANCELLED) {
+      await rabbitMQClient.publishMessage(QUEUES.PAYMENT_FAILED, {
         id: uuidv4(),
         timestamp: Date.now(),
         data: eventData,

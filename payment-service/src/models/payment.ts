@@ -6,7 +6,8 @@ export enum PaymentStatus {
   PROCESSING = 'PROCESSING',
   COMPLETED = 'COMPLETED',
   FAILED = 'FAILED',
-  REFUNDED = 'REFUNDED'
+  REFUNDED = 'REFUNDED',
+  CANCELLED = 'CANCELLED',
 }
 
 export enum PaymentMethod {

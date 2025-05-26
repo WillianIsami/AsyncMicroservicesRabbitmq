@@ -69,7 +69,6 @@ Order-Subscriber:
 Payment-Subscriber:
 
 - Recebe a mensagem da fila ORDER_CREATED
-
 - Faz uma requisição para o payment-service para criar e processar o pagamento
 - Se o pagamento for aprovado, publica uma mensagem na fila PAYMENT_PROCESSED
 - Se o pagamento falhar, publica uma mensagem na fila PAYMENT_FAILED
@@ -89,6 +88,11 @@ Inventory-Subscriber:
 - Publica mensagem na fila INVENTORY_UPDATED
 - Se algum item não estiver disponível:
     - Publica mensagem na fila INVENTORY_FAILED
+
+Payment-Subscriber:
+
+- Recebe a mensagem da fila INVENTORY_FAILED_PAYMENT
+- Busca e cancela pagamentos associados aos pedidos afetados
 
 Order-Subscriber (finalização):
 

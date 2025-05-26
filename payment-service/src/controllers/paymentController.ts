@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { paymentProcessor } from '../services/paymentProcessor';
 import { paymentRepository } from '../repositories/paymentRepository';
+import { PaymentStatus } from '../models/payment';
 
 export class PaymentController {
   async createPayment(req: Request, res: Response) {
@@ -61,6 +62,36 @@ export class PaymentController {
       console.error('Erro ao processar pagamento:', error instanceof Error ? error.message : String(error));
       res.status(500).json({ 
         error: 'Erro ao processar pagamento',
+      });
+    }
+  }
+
+  async cancelPayment(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { reason } = req.body;
+      
+      await paymentProcessor.cancelPayment(id, reason);
+      
+      res.json({ 
+        message: 'Pagamento cancelado com sucesso',
+        paymentId: id,
+        status: PaymentStatus.CANCELLED
+      });
+    } catch (error) {
+      console.error('Erro ao cancelar pagamento:', error instanceof Error ? error.message : String(error));
+      
+      let status = 500;
+      if (error instanceof Error) {
+        if (error.message.includes('não encontrado')) {
+          status = 404;
+        } else if (error.message.includes('não pode ser cancelado')) {
+          status = 400;
+        }
+      }
+      
+      res.status(status).json({ 
+        error: error instanceof Error ? error.message : 'Erro ao cancelar pagamento' 
       });
     }
   }

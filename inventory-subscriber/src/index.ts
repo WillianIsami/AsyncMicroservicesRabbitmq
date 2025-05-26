@@ -76,7 +76,7 @@ async function handleInventoryCheck(message: any) {
       }
     } else {
       console.log(`Estoque insuficiente para pedido ${orderId}`);
-      await rabbitMQClient.publishMessage(QUEUES.INVENTORY_FAILED, {
+      const message = {
         id: uuidv4(),
         timestamp: Date.now(),
         data: {
@@ -85,11 +85,13 @@ async function handleInventoryCheck(message: any) {
           results: stockResults,
           message: 'Estoque insuficiente'
         }
-      });
+      }
+      await rabbitMQClient.publishMessage(QUEUES.INVENTORY_FAILED, message);
+      await rabbitMQClient.publishMessage(QUEUES.INVENTORY_FAILED_PAYMENT, message);
     }
   } catch (error) {
     console.error(`Erro ao processar verificação de estoque:`, error instanceof Error ? error.message : String(error));
-    await rabbitMQClient.publishMessage(QUEUES.INVENTORY_FAILED, {
+    const msg = {
       id: uuidv4(),
       timestamp: Date.now(),
       data: {
@@ -97,7 +99,9 @@ async function handleInventoryCheck(message: any) {
         originalMessage: message.data,
         error: error instanceof Error ? error.message : String(error)
       }
-    });
+    }
+    await rabbitMQClient.publishMessage(QUEUES.INVENTORY_FAILED, msg);
+    await rabbitMQClient.publishMessage(QUEUES.INVENTORY_FAILED_PAYMENT, msg);
   }
 }
 

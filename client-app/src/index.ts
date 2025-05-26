@@ -5,8 +5,9 @@ import { v4 as uuidv4 } from 'uuid';
 const sampleOrder = {
   customerId: 'cust-' + uuidv4(),
   items: [
-    { productId: 'c5d1a620-7e1e-4be9-8f2d-21a6e6c1f123', quantity: 3, price: 159.90 },
-    { productId: '1b8f5d09-4e5e-4df3-8efc-b7e383d5a2ac', quantity: 4, price: 229.90 }
+    { productId: 'c5d1a620-7e1e-4be9-8f2d-21a6e6c1f123', quantity: 2, price: 159.90 },
+    // { productId: '1b8f5d09-4e5e-4df3-8efc-b7e383d5a2ac-', quantity: 2, price: 229.90 },
+    { productId: '8cf3e919-d2d9-4ab3-8e1e-3c5e0c7bb2f1', quantity: 2, price: 849.00 },
   ]
 };
 
